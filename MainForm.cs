@@ -15,11 +15,13 @@ namespace LocalServiceManager
         private readonly TextBox _log;
         private readonly CheckBox _startupCheckBox;
         private readonly Timer _timer;
+        private Label _titleLabel;
         private IList<ManagedServiceStatus> _lastStatuses = new List<ManagedServiceStatus>();
         private bool _busy;
         private bool _exitRequested;
         private bool _syncingStartup;
         private bool _syncingServiceAutoStart;
+        private bool _syncingTabs;
 
         public MainForm(ServiceManager services)
         {
@@ -119,13 +121,14 @@ namespace LocalServiceManager
             bar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 128));
             bar.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
-            bar.Controls.Add(new Label
+            _titleLabel = new Label
             {
                 Text = _services.Config.Title,
                 Font = new Font(Font.FontFamily, 15F, FontStyle.Bold),
                 Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleLeft
-            }, 0, 0);
+            };
+            bar.Controls.Add(_titleLabel, 0, 0);
             bar.Controls.Add(Button("刷新状态", delegate { return RefreshStatusesAsync(true); }), 1, 0);
             return bar;
         }
@@ -149,6 +152,7 @@ namespace LocalServiceManager
             if (tabs.TabPages.Count == 0) tabs.TabPages.Add(BuildTabPage("全部", ""));
             tabs.SelectedIndexChanged += delegate
             {
+                if (_syncingTabs) return;
                 MoveGridToSelectedTab();
                 PopulateGrid(_lastStatuses);
             };
@@ -168,10 +172,55 @@ namespace LocalServiceManager
 
         private void MoveGridToSelectedTab(TabControl tabs)
         {
+            if (tabs.TabPages.Count == 0) return;
             if (_grid.Parent != null) _grid.Parent.Controls.Remove(_grid);
             var page = tabs.SelectedTab ?? tabs.TabPages[0];
             page.Controls.Add(_grid);
             _grid.Dock = DockStyle.Fill;
+        }
+
+        private void SyncConfigUi()
+        {
+            Text = _services.Config.Title;
+            if (_titleLabel != null) _titleLabel.Text = _services.Config.Title;
+            SyncTabsWithConfig();
+        }
+
+        private void SyncTabsWithConfig()
+        {
+            var selectedTag = CurrentTag;
+            _syncingTabs = true;
+            try
+            {
+                if (_grid.Parent != null) _grid.Parent.Controls.Remove(_grid);
+                _tabs.TabPages.Clear();
+                var configuredTabs = _services.Config.tabs;
+                if (configuredTabs != null)
+                {
+                    foreach (var tab in configuredTabs)
+                    {
+                        if (tab == null) continue;
+                        var title = string.IsNullOrWhiteSpace(tab.label) ? "全部" : tab.label;
+                        _tabs.TabPages.Add(BuildTabPage(title, tab.tag ?? ""));
+                    }
+                }
+                if (_tabs.TabPages.Count == 0) _tabs.TabPages.Add(BuildTabPage("全部", ""));
+                var selectedIndex = 0;
+                for (var i = 0; i < _tabs.TabPages.Count; i++)
+                {
+                    if (string.Equals(Convert.ToString(_tabs.TabPages[i].Tag) ?? "", selectedTag, StringComparison.OrdinalIgnoreCase))
+                    {
+                        selectedIndex = i;
+                        break;
+                    }
+                }
+                _tabs.SelectedIndex = selectedIndex;
+                MoveGridToSelectedTab();
+            }
+            finally
+            {
+                _syncingTabs = false;
+            }
         }
 
         private string CurrentTag
@@ -188,18 +237,20 @@ namespace LocalServiceManager
             var panel = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
-                ColumnCount = 3,
+                ColumnCount = 4,
                 RowCount = 1,
                 Padding = new Padding(0, 8, 0, 8)
             };
-            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 24));
-            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 24));
-            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 52));
+            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 19));
+            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 19));
+            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 18));
+            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 44));
             panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
-            panel.Controls.Add(Button("打开配置", delegate { _services.OpenConfig(); }), 0, 0);
-            panel.Controls.Add(Button("打开日志目录", delegate { _services.OpenLogs(); }), 1, 0);
-            panel.Controls.Add(_startupCheckBox, 2, 0);
+            panel.Controls.Add(Button("打开本地配置", delegate { _services.OpenLocalConfig(); }), 0, 0);
+            panel.Controls.Add(Button("打开实例配置", delegate { _services.OpenInstanceConfig(); }), 1, 0);
+            panel.Controls.Add(Button("打开日志目录", delegate { _services.OpenLogs(); }), 2, 0);
+            panel.Controls.Add(_startupCheckBox, 3, 0);
             return panel;
         }
 
@@ -254,7 +305,8 @@ namespace LocalServiceManager
             menu.Items.Add("停止全部", null, delegate { RunFireAndForget(delegate { return RunActionAsync("停止全部", _services.StopAllAsync); }); });
             menu.Items.Add("刷新状态", null, delegate { RunFireAndForget(delegate { return RefreshStatusesAsync(true); }); });
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("打开配置", null, delegate { _services.OpenConfig(); });
+            menu.Items.Add("打开本地配置", null, delegate { _services.OpenLocalConfig(); });
+            menu.Items.Add("打开实例配置", null, delegate { _services.OpenInstanceConfig(); });
             menu.Items.Add("打开日志目录", null, delegate { _services.OpenLogs(); });
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("退出", null, delegate { _exitRequested = true; Close(); });
@@ -340,10 +392,12 @@ namespace LocalServiceManager
             if (_busy) return;
             try
             {
+                var configReloaded = _services.ReloadConfigIfChanged();
+                if (configReloaded) SyncConfigUi();
                 _lastStatuses = await _services.GetStatusesAsync();
                 PopulateGrid(_lastStatuses);
                 _tray.Text = AllRunning(_lastStatuses) ? "本地服务：全部运行中" : "本地服务：部分未运行";
-                if (log) Log("状态已刷新");
+                if (log) Log(configReloaded ? "状态已刷新，配置已重新读取" : "状态已刷新");
             }
             catch (Exception ex)
             {

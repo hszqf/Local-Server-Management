@@ -11,30 +11,56 @@ namespace LocalServiceManager
     internal sealed class ServiceManager
     {
         private readonly AppPaths _paths;
-        private readonly LocalServiceConfig _config;
-        private readonly List<ManagedService> _services;
+        private LocalServiceConfig _config;
+        private List<ManagedService> _services;
+        private string _configPath;
+        private DateTime _configLastWriteTimeUtc;
 
         public ServiceManager(AppPaths paths)
         {
             _paths = paths;
-            _config = LocalServiceConfig.Load(paths);
-            _services = new List<ManagedService>();
-            foreach (var definition in _config.services)
-            {
-                if (string.IsNullOrWhiteSpace(definition.id)) continue;
-                _services.Add(new ManagedService(definition, _config.Expand(definition.endpoint)));
-            }
+            ReloadConfig();
         }
 
         public LocalServiceConfig Config { get { return _config; } }
         public IList<ManagedService> Services { get { return _services; } }
 
+        public void ReloadConfig()
+        {
+            var config = LocalServiceConfig.Load(_paths);
+            var services = new List<ManagedService>();
+            foreach (var definition in config.services)
+            {
+                if (string.IsNullOrWhiteSpace(definition.id)) continue;
+                services.Add(new ManagedService(definition, config.Expand(definition.endpoint)));
+            }
+            _config = config;
+            _services = services;
+            _configPath = config.SourcePath;
+            _configLastWriteTimeUtc = File.GetLastWriteTimeUtc(config.SourcePath);
+        }
+
+        public bool ReloadConfigIfChanged()
+        {
+            var configPath = CurrentConfigPath();
+            var lastWriteTimeUtc = File.GetLastWriteTimeUtc(configPath);
+            if (_config == null
+                || !string.Equals(configPath, _configPath, StringComparison.OrdinalIgnoreCase)
+                || lastWriteTimeUtc != _configLastWriteTimeUtc)
+            {
+                ReloadConfig();
+                return true;
+            }
+            return false;
+        }
+
         public Task<IList<ManagedServiceStatus>> GetStatusesAsync()
         {
+            var services = new List<ManagedService>(_services);
             return Task.Factory.StartNew<IList<ManagedServiceStatus>>(delegate
             {
                 var list = new List<ManagedServiceStatus>();
-                foreach (var service in _services)
+                foreach (var service in services)
                 {
                     list.Add(CheckService(service));
                 }
@@ -87,9 +113,15 @@ namespace LocalServiceManager
             });
         }
 
-        public void OpenConfig()
+        public void OpenLocalConfig()
         {
-            OpenUrl(_config.SourcePath);
+            EnsureLocalConfigExists();
+            OpenUrl(_paths.ConfigLocalPath);
+        }
+
+        public void OpenInstanceConfig()
+        {
+            OpenUrl(_paths.ConfigExamplePath);
         }
 
         public void OpenEndpoint(string endpoint)
@@ -100,6 +132,20 @@ namespace LocalServiceManager
         public void OpenLogs()
         {
             OpenUrl(_config.GetLogsPath());
+        }
+
+        private void EnsureLocalConfigExists()
+        {
+            if (File.Exists(_paths.ConfigLocalPath)) return;
+            if (!File.Exists(_paths.ConfigExamplePath)) throw new FileNotFoundException("Missing config.example.json", _paths.ConfigExamplePath);
+            File.Copy(_paths.ConfigExamplePath, _paths.ConfigLocalPath);
+        }
+
+        private string CurrentConfigPath()
+        {
+            if (File.Exists(_paths.ConfigLocalPath)) return _paths.ConfigLocalPath;
+            if (File.Exists(_paths.ConfigExamplePath)) return _paths.ConfigExamplePath;
+            throw new FileNotFoundException("Missing config.local.json or config.example.json", _paths.ConfigExamplePath);
         }
 
         private ManagedService FindService(string serviceId)
