@@ -1,0 +1,82 @@
+﻿{
+  "appTitle": "本地服务管理器",
+  "tabs": [
+    {
+      "label": "全部",
+      "tag": ""
+    },
+    {
+      "label": "示例服务",
+      "tag": "example"
+    }
+  ],
+  "links": {
+    "localUrl": "http://127.0.0.1:3000/",
+    "remoteUrl": "https://example.com/",
+    "logsPath": "{{LogRoot}}"
+  },
+  "variables": {
+    "PROJECT_ROOT": "C:\\path\\to\\your-project",
+    "LOG_ROOT": "{{LogRoot}}"
+  },
+  "services": [
+    {
+      "id": "example-web",
+      "name": "示例 Web 服务",
+      "endpoint": "http://127.0.0.1:3000",
+      "tags": [
+        "example"
+      ],
+      "health": {
+        "type": "http",
+        "url": "http://127.0.0.1:3000/",
+        "timeoutMs": 3000,
+        "okStatusMax": 399
+      },
+      "start": {
+        "type": "process",
+        "file": "powershell",
+        "workingDirectory": "{{PROJECT_ROOT}}",
+        "timeoutSeconds": 30,
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "Write-Output 'Replace this start action in config.local.json'"
+        ]
+      },
+      "stop": {
+        "type": "powershell",
+        "timeoutSeconds": 15,
+        "script": "Write-Output 'Replace this stop action in config.local.json'"
+      }
+    },
+    {
+      "id": "example-process",
+      "name": "示例进程服务",
+      "endpoint": "",
+      "tags": [
+        "example"
+      ],
+      "health": {
+        "type": "process",
+        "processName": "example.exe",
+        "timeoutMs": 3000,
+        "commandLineContainsAny": [
+          "example-service"
+        ]
+      },
+      "start": {
+        "type": "powershell",
+        "timeoutSeconds": 15,
+        "script": "Write-Output 'Replace this process start action in config.local.json'"
+      },
+      "stop": {
+        "type": "powershell",
+        "timeoutSeconds": 15,
+        "script": "Write-Output 'Replace this process stop action in config.local.json'"
+      }
+    }
+  ]
+}
