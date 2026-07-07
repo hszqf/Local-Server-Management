@@ -13,3 +13,4 @@
 - [x] Commit only generic examples.
 - [x] Keep private service definitions in ignored `config.local.json`.
 - [x] Keep local logs and temporary files ignored.
+- [x] Rename example config button text from `打开实例配置` to `打开示例配置`.

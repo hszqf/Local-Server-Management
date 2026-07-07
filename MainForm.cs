@@ -248,7 +248,7 @@ namespace LocalServiceManager
             panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
             panel.Controls.Add(Button("打开本地配置", delegate { _services.OpenLocalConfig(); }), 0, 0);
-            panel.Controls.Add(Button("打开实例配置", delegate { _services.OpenInstanceConfig(); }), 1, 0);
+            panel.Controls.Add(Button("打开示例配置", delegate { _services.OpenInstanceConfig(); }), 1, 0);
             panel.Controls.Add(Button("打开日志目录", delegate { _services.OpenLogs(); }), 2, 0);
             panel.Controls.Add(_startupCheckBox, 3, 0);
             return panel;
@@ -306,7 +306,7 @@ namespace LocalServiceManager
             menu.Items.Add("刷新状态", null, delegate { RunFireAndForget(delegate { return RefreshStatusesAsync(true); }); });
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("打开本地配置", null, delegate { _services.OpenLocalConfig(); });
-            menu.Items.Add("打开实例配置", null, delegate { _services.OpenInstanceConfig(); });
+            menu.Items.Add("打开示例配置", null, delegate { _services.OpenInstanceConfig(); });
             menu.Items.Add("打开日志目录", null, delegate { _services.OpenLogs(); });
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("退出", null, delegate { _exitRequested = true; Close(); });
