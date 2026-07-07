@@ -188,20 +188,18 @@ namespace LocalServiceManager
             var panel = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
-                ColumnCount = 4,
+                ColumnCount = 3,
                 RowCount = 1,
                 Padding = new Padding(0, 8, 0, 8)
             };
-            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 22));
-            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 22));
-            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 22));
-            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 34));
+            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 24));
+            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 24));
+            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 52));
             panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
-            panel.Controls.Add(Button("打开本地", delegate { _services.OpenLocal(); }), 0, 0);
-            panel.Controls.Add(Button("打开固定域名", delegate { _services.OpenRemote(); }), 1, 0);
-            panel.Controls.Add(Button("打开日志目录", delegate { _services.OpenLogs(); }), 2, 0);
-            panel.Controls.Add(_startupCheckBox, 3, 0);
+            panel.Controls.Add(Button("打开配置", delegate { _services.OpenConfig(); }), 0, 0);
+            panel.Controls.Add(Button("打开日志目录", delegate { _services.OpenLogs(); }), 1, 0);
+            panel.Controls.Add(_startupCheckBox, 2, 0);
             return panel;
         }
 
@@ -224,7 +222,16 @@ namespace LocalServiceManager
                 EditMode = DataGridViewEditMode.EditOnEnter
             };
             grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "name", HeaderText = "服务", ReadOnly = true, Width = 170 });
-            grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "endpoint", HeaderText = "地址", ReadOnly = true, Width = 270 });
+            grid.Columns.Add(new DataGridViewLinkColumn
+            {
+                Name = "endpoint",
+                HeaderText = "地址",
+                ReadOnly = true,
+                Width = 270,
+                TrackVisitedState = false,
+                LinkBehavior = LinkBehavior.HoverUnderline,
+                UseColumnTextForLinkValue = false
+            });
             grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "detail", HeaderText = "详情", ReadOnly = true, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill });
             grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "state", HeaderText = "状态", ReadOnly = true, Width = 90 });
             grid.Columns.Add(new DataGridViewButtonColumn { Name = "action", HeaderText = "操作", ReadOnly = true, Width = 82, UseColumnTextForButtonValue = false });
@@ -247,8 +254,8 @@ namespace LocalServiceManager
             menu.Items.Add("停止全部", null, delegate { RunFireAndForget(delegate { return RunActionAsync("停止全部", _services.StopAllAsync); }); });
             menu.Items.Add("刷新状态", null, delegate { RunFireAndForget(delegate { return RefreshStatusesAsync(true); }); });
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("打开本地", null, delegate { _services.OpenLocal(); });
-            menu.Items.Add("打开固定域名", null, delegate { _services.OpenRemote(); });
+            menu.Items.Add("打开配置", null, delegate { _services.OpenConfig(); });
+            menu.Items.Add("打开日志目录", null, delegate { _services.OpenLogs(); });
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("退出", null, delegate { _exitRequested = true; Close(); });
 
@@ -371,6 +378,7 @@ namespace LocalServiceManager
                     row.Cells["state"].Style.ForeColor = status.Running ? Color.FromArgb(16, 128, 56) : Color.FromArgb(192, 36, 36);
                     row.Cells["state"].Style.SelectionForeColor = row.Cells["state"].Style.ForeColor;
                     row.Cells["state"].Style.Font = new Font(Font, FontStyle.Bold);
+                    row.Cells["endpoint"].ToolTipText = string.IsNullOrWhiteSpace(status.Service.Endpoint) ? "" : "点击打开浏览器";
                 }
                 _grid.ClearSelection();
             }
@@ -384,8 +392,14 @@ namespace LocalServiceManager
         {
             if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
             var grid = (DataGridView)sender;
-            if (grid.Columns[e.ColumnIndex].Name != "action") return;
+            var columnName = grid.Columns[e.ColumnIndex].Name;
             var row = grid.Rows[e.RowIndex];
+            if (columnName == "endpoint")
+            {
+                OpenEndpoint(row);
+                return;
+            }
+            if (columnName != "action") return;
             var serviceId = row.Tag as string;
             if (string.IsNullOrWhiteSpace(serviceId)) return;
             var serviceName = Convert.ToString(row.Cells["name"].Value);
@@ -399,6 +413,21 @@ namespace LocalServiceManager
                         : _services.StartServiceAsync(serviceId);
                 });
             });
+        }
+
+        private void OpenEndpoint(DataGridViewRow row)
+        {
+            var endpoint = Convert.ToString(row.Cells["endpoint"].Value);
+            if (string.IsNullOrWhiteSpace(endpoint)) return;
+            try
+            {
+                _services.OpenEndpoint(endpoint);
+            }
+            catch (Exception ex)
+            {
+                Log("打开地址失败: " + ex.Message);
+                MessageBox.Show(this, ex.Message, "打开地址", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
 
         private void OnGridCellValueChanged(object sender, DataGridViewCellEventArgs e)

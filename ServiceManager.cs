@@ -87,14 +87,14 @@ namespace LocalServiceManager
             });
         }
 
-        public void OpenLocal()
+        public void OpenConfig()
         {
-            OpenUrl(_config.Expand(_config.links.localUrl));
+            OpenUrl(_config.SourcePath);
         }
 
-        public void OpenRemote()
+        public void OpenEndpoint(string endpoint)
         {
-            OpenUrl(_config.Expand(_config.links.remoteUrl));
+            OpenUrl(endpoint);
         }
 
         public void OpenLogs()
