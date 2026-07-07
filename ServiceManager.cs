@@ -256,7 +256,8 @@ namespace LocalServiceManager
 
         private Task<string> RunPowerShellAsync(string command, TimeSpan timeout)
         {
-            return RunProcessAsync("powershell", new[] { "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command }, _paths.AppRoot, timeout, false);
+            var utf8Command = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $OutputEncoding = [Console]::OutputEncoding; " + command;
+            return RunProcessAsync("powershell", new[] { "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", utf8Command }, _paths.AppRoot, timeout, false);
         }
 
         private static Task<string> RunProcessAsync(string fileName, string[] args, string workingDirectory, TimeSpan timeout, bool detached)
