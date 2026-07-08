@@ -3,3 +3,4 @@ logs/
 tmp/
 *.log
 *.user
+dist/*.TMP

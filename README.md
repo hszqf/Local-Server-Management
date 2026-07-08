@@ -59,6 +59,7 @@ Each service supports:
 - `health`: `http` or `process` health check.
 - `start`: `process` or `powershell` start action.
 - `stop`: `process` or `powershell` stop action.
+- `detached`: for `process` actions, set this to `true` when the command launches a long-running server and should return control to the manager immediately.
 
 Supported placeholders:
 

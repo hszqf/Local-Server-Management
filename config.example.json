@@ -38,6 +38,7 @@
         "file": "powershell",
         "workingDirectory": "{{PROJECT_ROOT}}",
         "timeoutSeconds": 30,
+        "detached": false,
         "args": [
           "-NoProfile",
           "-ExecutionPolicy",

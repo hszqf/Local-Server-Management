@@ -172,9 +172,13 @@ namespace LocalServiceManager
             var timeoutMs = health.timeoutMs > 0 ? health.timeoutMs : 3000;
             var maxStatus = health.okStatusMax > 0 ? health.okStatusMax : 399;
             var result = TryHttp(url, timeoutMs);
-            if (result.StatusCode <= 0 || result.StatusCode > maxStatus)
+            if (result.StatusCode <= 0)
             {
-                return new ManagedServiceStatus(service, false, "未运行", result.Error);
+                return new ManagedServiceStatus(service, false, result.TimedOut ? "异常" : "未运行", result.Error);
+            }
+            if (result.StatusCode > maxStatus)
+            {
+                return new ManagedServiceStatus(service, false, "异常", result.Error);
             }
             if (health.requiredText != null)
             {
@@ -311,9 +315,10 @@ namespace LocalServiceManager
                 request.ReadWriteTimeout = timeoutMs;
                 request.AllowAutoRedirect = true;
                 request.UserAgent = "LocalServiceManager/1.0";
+                if (IsLoopbackUrl(url)) request.Proxy = null;
                 using (var response = (HttpWebResponse)request.GetResponse())
                 {
-                    return new HttpResult((int)response.StatusCode, ReadBody(response), "HTTP " + (int)response.StatusCode);
+                    return new HttpResult((int)response.StatusCode, ReadBody(response), "HTTP " + (int)response.StatusCode, false);
                 }
             }
             catch (WebException ex)
@@ -323,14 +328,16 @@ namespace LocalServiceManager
                 {
                     using (response)
                     {
-                        return new HttpResult((int)response.StatusCode, ReadBody(response), ex.Message);
+                        return new HttpResult((int)response.StatusCode, ReadBody(response), ex.Message, false);
                     }
                 }
-                return new HttpResult(0, "", ex.Message);
+                var timedOut = ex.Status == WebExceptionStatus.Timeout;
+                var error = timedOut ? "HTTP health check timed out after " + timeoutMs + "ms" : ex.Message;
+                return new HttpResult(0, "", error, timedOut);
             }
             catch (Exception ex)
             {
-                return new HttpResult(0, "", ex.Message);
+                return new HttpResult(0, "", ex.Message, false);
             }
         }
 
@@ -341,6 +348,15 @@ namespace LocalServiceManager
             {
                 return reader.ReadToEnd();
             }
+        }
+
+        private static bool IsLoopbackUrl(string url)
+        {
+            Uri uri;
+            if (!Uri.TryCreate(url, UriKind.Absolute, out uri)) return false;
+            if (string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase)) return true;
+            IPAddress address;
+            return IPAddress.TryParse(uri.Host, out address) && IPAddress.IsLoopback(address);
         }
 
         private static Task<string> UnknownServiceAsync(string serviceId)
@@ -388,12 +404,14 @@ namespace LocalServiceManager
             public readonly int StatusCode;
             public readonly string Body;
             public readonly string Error;
+            public readonly bool TimedOut;
 
-            public HttpResult(int statusCode, string body, string error)
+            public HttpResult(int statusCode, string body, string error, bool timedOut)
             {
                 StatusCode = statusCode;
                 Body = body;
                 Error = error;
+                TimedOut = timedOut;
             }
         }
     }
