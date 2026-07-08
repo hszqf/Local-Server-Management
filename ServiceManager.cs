@@ -180,6 +180,10 @@ namespace LocalServiceManager
             {
                 return new ManagedServiceStatus(service, false, "异常", result.Error);
             }
+            if (result.StatusCode > maxStatus)
+            {
+                return new ManagedServiceStatus(service, false, "异常", result.Error);
+            }
             if (health.requiredText != null)
             {
                 foreach (var required in health.requiredText)
