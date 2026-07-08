@@ -15,9 +15,11 @@ namespace LocalServiceManager
         private readonly TextBox _log;
         private readonly CheckBox _startupCheckBox;
         private readonly Timer _timer;
+        private readonly Timer _autoStartWatchTimer;
         private Label _titleLabel;
         private IList<ManagedServiceStatus> _lastStatuses = new List<ManagedServiceStatus>();
         private bool _busy;
+        private bool _autoStartCheckBusy;
         private bool _exitRequested;
         private bool _syncingStartup;
         private bool _syncingServiceAutoStart;
@@ -73,6 +75,10 @@ namespace LocalServiceManager
             _timer.Tick += delegate { RunFireAndForget(delegate { return RefreshStatusesAsync(false); }); };
             _timer.Start();
 
+            _autoStartWatchTimer = new Timer { Interval = 30000 };
+            _autoStartWatchTimer.Tick += delegate { RunFireAndForget(delegate { return EnsureAutoStartServicesRunningAsync("自动启动巡检"); }); };
+            _autoStartWatchTimer.Start();
+
             Shown += delegate { RunFireAndForget(InitialRefreshAndAutoStartAsync); };
             FormClosing += OnFormClosing;
             UpdateStartupCheckBox();
@@ -83,6 +89,7 @@ namespace LocalServiceManager
             if (disposing)
             {
                 _timer.Dispose();
+                _autoStartWatchTimer.Dispose();
                 _tray.Dispose();
             }
             base.Dispose(disposing);
@@ -365,31 +372,51 @@ namespace LocalServiceManager
         private async Task InitialRefreshAndAutoStartAsync()
         {
             await RefreshStatusesAsync(true);
-            await StartEnabledStoppedServicesAsync();
+            await EnsureAutoStartServicesRunningAsync("启动时自动启动");
         }
 
-        private async Task StartEnabledStoppedServicesAsync()
+        private async Task EnsureAutoStartServicesRunningAsync(string label)
         {
-            var statuses = await _services.GetStatusesAsync();
-            var enabledIds = new List<string>();
-            foreach (var status in statuses)
+            if (_busy || _autoStartCheckBusy) return;
+            _busy = true;
+            _autoStartCheckBusy = true;
+            try
             {
-                if (ServiceAutoStartManager.IsEnabled(status.Service.Id)) enabledIds.Add(status.Service.Id);
+                var configReloaded = _services.ReloadConfigIfChanged();
+                if (configReloaded) SyncConfigUi();
+                var statuses = await _services.GetStatusesAsync();
+                var startedAny = false;
+                foreach (var status in statuses)
+                {
+                    if (!ShouldAutoStart(status)) continue;
+                    Log("> " + label + " " + status.Service.Name + " ...");
+                    var output = await _services.StartServiceAsync(status.Service.Id);
+                    if (!string.IsNullOrWhiteSpace(output)) Log(output);
+                    startedAny = true;
+                }
+                if (startedAny || configReloaded)
+                {
+                    _lastStatuses = await _services.GetStatusesAsync();
+                    PopulateGrid(_lastStatuses);
+                    _tray.Text = AllRunning(_lastStatuses) ? "本地服务：全部运行中" : "本地服务：部分未运行";
+                    if (startedAny) Log(label + "已完成");
+                }
             }
-
-            foreach (var id in enabledIds)
+            catch (Exception ex)
             {
-                var current = FindStatus(await _services.GetStatusesAsync(), id);
-                if (current == null || current.Running) continue;
-                var serviceId = id;
-                var serviceName = current.Service.Name;
-                await RunActionAsync("自动启动 " + serviceName, delegate { return _services.StartServiceAsync(serviceId); });
+                Log(label + "失败: " + ex.Message);
+            }
+            finally
+            {
+                _autoStartCheckBusy = false;
+                _busy = false;
+                UpdateStartupCheckBox();
             }
         }
 
         private async Task RefreshStatusesAsync(bool log)
         {
-            if (_busy) return;
+            if (_busy || _autoStartCheckBusy) return;
             try
             {
                 var configReloaded = _services.ReloadConfigIfChanged();
@@ -504,6 +531,14 @@ namespace LocalServiceManager
                 if (string.Equals(status.Service.Id, id, StringComparison.OrdinalIgnoreCase)) return status;
             }
             return null;
+        }
+
+        private static bool ShouldAutoStart(ManagedServiceStatus status)
+        {
+            return status != null
+                && !status.Running
+                && string.Equals(status.State, "未运行", StringComparison.OrdinalIgnoreCase)
+                && ServiceAutoStartManager.IsEnabled(status.Service.Id);
         }
 
         private static bool AllRunning(IList<ManagedServiceStatus> statuses)

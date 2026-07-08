@@ -7,3 +7,4 @@
 - Keep service display names user-facing. Implementation details can stay in config commands, logs, or health checks.
 - Public repos should commit `config.example.json` only. Machine-specific paths, domains, token locations, and service commands belong in ignored `config.local.json`.
 - Service tabs, health checks, endpoints, and start/stop actions should be config data. Adding a new service should not require C# source edits.
+- Auto-start checks must distinguish not-started from unhealthy: only run start actions for `未运行` service statuses, and classify HTTP responses with bad status/content as `异常` so live services are not touched.
