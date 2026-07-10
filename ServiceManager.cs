@@ -218,7 +218,9 @@ namespace LocalServiceManager
                 }
             }
             sb.AppendLine(")");
+            sb.AppendLine("$selfPid=$PID");
             sb.AppendLine("$procs = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue");
+            sb.AppendLine("$procs = $procs | Where-Object { $_.ProcessId -ne $selfPid }");
             sb.AppendLine("if($name){ $procs = $procs | Where-Object { $_.Name -ieq $name } }");
             sb.AppendLine("if($needles.Count -gt 0){ $procs = $procs | Where-Object { $cmd=$_.CommandLine; $cmd -and ($needles | Where-Object { $cmd -like ('*'+$_+'*') }) } }");
             sb.AppendLine("$procs | Select-Object -First 5 | ForEach-Object { [string]$_.ProcessId + ' ' + $_.Name }");
