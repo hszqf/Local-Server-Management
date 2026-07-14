@@ -19,6 +19,7 @@ namespace LocalServiceManager
         private Label _titleLabel;
         private IList<ManagedServiceStatus> _lastStatuses = new List<ManagedServiceStatus>();
         private bool _busy;
+        private bool _refreshBusy;
         private bool _autoStartCheckBusy;
         private bool _exitRequested;
         private bool _syncingStartup;
@@ -136,7 +137,7 @@ namespace LocalServiceManager
                 TextAlign = ContentAlignment.MiddleLeft
             };
             bar.Controls.Add(_titleLabel, 0, 0);
-            bar.Controls.Add(Button("刷新状态", delegate { return RefreshStatusesAsync(true); }), 1, 0);
+            bar.Controls.Add(Button("刷新状态", delegate { return RefreshStatusesAsync(true, true); }), 1, 0);
             return bar;
         }
 
@@ -310,7 +311,7 @@ namespace LocalServiceManager
             menu.Items.Add("显示面板", null, delegate { ShowWindow(); });
             menu.Items.Add("启动全部", null, delegate { RunFireAndForget(delegate { return RunActionAsync("启动全部", _services.StartAllAsync); }); });
             menu.Items.Add("停止全部", null, delegate { RunFireAndForget(delegate { return RunActionAsync("停止全部", _services.StopAllAsync); }); });
-            menu.Items.Add("刷新状态", null, delegate { RunFireAndForget(delegate { return RefreshStatusesAsync(true); }); });
+            menu.Items.Add("刷新状态", null, delegate { RunFireAndForget(delegate { return RefreshStatusesAsync(true, true); }); });
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("打开本地配置", null, delegate { _services.OpenLocalConfig(); });
             menu.Items.Add("打开示例配置", null, delegate { _services.OpenInstanceConfig(); });
@@ -414,9 +415,10 @@ namespace LocalServiceManager
             }
         }
 
-        private async Task RefreshStatusesAsync(bool log)
+        private async Task RefreshStatusesAsync(bool log, bool allowDuringAction)
         {
-            if (_busy || _autoStartCheckBusy) return;
+            if (_refreshBusy || _autoStartCheckBusy || (_busy && !allowDuringAction)) return;
+            _refreshBusy = true;
             try
             {
                 var configReloaded = _services.ReloadConfigIfChanged();
@@ -430,7 +432,16 @@ namespace LocalServiceManager
             {
                 Log("刷新状态失败: " + ex.Message);
             }
+            finally
+            {
+                _refreshBusy = false;
+            }
             UpdateStartupCheckBox();
+        }
+
+        private Task RefreshStatusesAsync(bool log)
+        {
+            return RefreshStatusesAsync(log, false);
         }
 
         private void PopulateGrid(IList<ManagedServiceStatus> statuses)
