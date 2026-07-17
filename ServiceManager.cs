@@ -203,35 +203,17 @@ namespace LocalServiceManager
 
         private ManagedServiceStatus CheckProcess(ManagedService service, ServiceHealthConfig health)
         {
-            var output = RunPowerShellAsync(BuildProcessHealthScript(health), TimeSpan.FromMilliseconds(health.timeoutMs > 0 ? health.timeoutMs : 5000)).Result;
-            if (string.IsNullOrWhiteSpace(output))
-            {
-                return new ManagedServiceStatus(service, false, "未运行", "process not found");
-            }
-            return new ManagedServiceStatus(service, true, "运行中", TrimLog(output));
-        }
-
-        private string BuildProcessHealthScript(ServiceHealthConfig health)
-        {
-            var sb = new StringBuilder();
-            sb.Append("$name=").Append(PsSingle(_config.Expand(health.processName))).AppendLine();
-            sb.Append("$needles=@(");
+            var needles = new List<string>();
             if (health.commandLineContainsAny != null)
             {
-                for (var i = 0; i < health.commandLineContainsAny.Count; i++)
+                foreach (var value in health.commandLineContainsAny)
                 {
-                    if (i > 0) sb.Append(",");
-                    sb.Append(PsSingle(_config.Expand(health.commandLineContainsAny[i])));
+                    needles.Add(_config.Expand(value));
                 }
             }
-            sb.AppendLine(")");
-            sb.AppendLine("$selfPid=$PID");
-            sb.AppendLine("$procs = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue");
-            sb.AppendLine("$procs = $procs | Where-Object { $_.ProcessId -ne $selfPid }");
-            sb.AppendLine("if($name){ $procs = $procs | Where-Object { $_.Name -ieq $name } }");
-            sb.AppendLine("if($needles.Count -gt 0){ $procs = $procs | Where-Object { $cmd=$_.CommandLine; $cmd -and ($needles | Where-Object { $cmd -like ('*'+$_+'*') }) } }");
-            sb.AppendLine("$procs | Select-Object -First 5 | ForEach-Object { [string]$_.ProcessId + ' ' + $_.Name }");
-            return sb.ToString();
+            var result = ProcessHealthChecker.Check(_config.Expand(health.processName ?? ""), needles);
+            if (result.Found) return new ManagedServiceStatus(service, true, "运行中", TrimLog(result.Detail));
+            return new ManagedServiceStatus(service, false, result.InspectionFailed ? "异常" : "未运行", result.Detail);
         }
 
         private Task<string> ExecuteActionAsync(ManagedService service, ServiceActionConfig action, string verb)

@@ -14,6 +14,7 @@ $Sources = @(
   "Models.cs",
   "StartupManager.cs",
   "ServiceConfig.cs",
+  "ProcessHealthChecker.cs",
   "ServiceManager.cs",
   "MainForm.cs"
 ) | ForEach-Object { Join-Path $PSScriptRoot $_ }
