@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Net;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -28,6 +29,7 @@ namespace LocalServiceManager
                     return;
                 }
 
+                ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
                 Application.Run(new MainForm(new ServiceManager(AppPaths.Current)));

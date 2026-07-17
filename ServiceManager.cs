@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Net;
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -171,10 +173,11 @@ namespace LocalServiceManager
             var url = _config.Expand(string.IsNullOrWhiteSpace(health.url) ? service.Endpoint : health.url);
             var timeoutMs = health.timeoutMs > 0 ? health.timeoutMs : 3000;
             var maxStatus = health.okStatusMax > 0 ? health.okStatusMax : 399;
-            var result = TryHttp(url, timeoutMs);
+            var result = TryHttp(url, timeoutMs, _config.Expand(health.tlsCaFile));
             if (result.StatusCode <= 0)
             {
-                return new ManagedServiceStatus(service, false, result.TimedOut ? "异常" : "未运行", result.Error);
+                var state = result.Unavailable ? "未运行" : "异常";
+                return new ManagedServiceStatus(service, false, state, result.Error);
             }
             if (result.StatusCode > maxStatus)
             {
@@ -312,19 +315,37 @@ namespace LocalServiceManager
             });
         }
 
-        private static HttpResult TryHttp(string url, int timeoutMs)
+        private static HttpResult TryHttp(string url, int timeoutMs, string tlsCaFile)
         {
+            X509Certificate2 trustedCa = null;
             try
             {
+                if (!string.IsNullOrWhiteSpace(tlsCaFile))
+                {
+                    Uri uri;
+                    if (!Uri.TryCreate(url, UriKind.Absolute, out uri) || !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw new InvalidOperationException("tlsCaFile requires an HTTPS health URL");
+                    }
+                    if (!File.Exists(tlsCaFile)) throw new FileNotFoundException("TLS CA file not found", tlsCaFile);
+                    trustedCa = new X509Certificate2(tlsCaFile);
+                }
                 var request = (HttpWebRequest)WebRequest.Create(url);
                 request.Timeout = timeoutMs;
                 request.ReadWriteTimeout = timeoutMs;
                 request.AllowAutoRedirect = true;
                 request.UserAgent = "LocalServiceManager/1.0";
-                if (IsLoopbackUrl(url)) request.Proxy = null;
+                if (IsLocalNetworkUrl(url)) request.Proxy = null;
+                if (trustedCa != null)
+                {
+                    request.ServerCertificateValidationCallback = delegate(object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors errors)
+                    {
+                        return ValidateServerCertificate(certificate, errors, trustedCa);
+                    };
+                }
                 using (var response = (HttpWebResponse)request.GetResponse())
                 {
-                    return new HttpResult((int)response.StatusCode, ReadBody(response), "HTTP " + (int)response.StatusCode, false);
+                    return new HttpResult((int)response.StatusCode, ReadBody(response), "HTTP " + (int)response.StatusCode, false, false);
                 }
             }
             catch (WebException ex)
@@ -334,16 +355,23 @@ namespace LocalServiceManager
                 {
                     using (response)
                     {
-                        return new HttpResult((int)response.StatusCode, ReadBody(response), ex.Message, false);
+                        return new HttpResult((int)response.StatusCode, ReadBody(response), ex.Message, false, false);
                     }
                 }
                 var timedOut = ex.Status == WebExceptionStatus.Timeout;
+                var unavailable = ex.Status == WebExceptionStatus.ConnectFailure
+                    || ex.Status == WebExceptionStatus.NameResolutionFailure
+                    || ex.Status == WebExceptionStatus.ProxyNameResolutionFailure;
                 var error = timedOut ? "HTTP health check timed out after " + timeoutMs + "ms" : ex.Message;
-                return new HttpResult(0, "", error, timedOut);
+                return new HttpResult(0, "", error, timedOut, unavailable);
             }
             catch (Exception ex)
             {
-                return new HttpResult(0, "", ex.Message, false);
+                return new HttpResult(0, "", ex.Message, false, false);
+            }
+            finally
+            {
+                if (trustedCa != null) trustedCa.Dispose();
             }
         }
 
@@ -356,13 +384,37 @@ namespace LocalServiceManager
             }
         }
 
-        private static bool IsLoopbackUrl(string url)
+        private static bool ValidateServerCertificate(X509Certificate certificate, SslPolicyErrors errors, X509Certificate2 trustedCa)
+        {
+            if (certificate == null || trustedCa == null) return false;
+            if ((errors & (SslPolicyErrors.RemoteCertificateNameMismatch | SslPolicyErrors.RemoteCertificateNotAvailable)) != 0) return false;
+            using (var serverCertificate = new X509Certificate2(certificate))
+            using (var validationChain = new X509Chain())
+            {
+                validationChain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+                validationChain.ChainPolicy.VerificationFlags = X509VerificationFlags.AllowUnknownCertificateAuthority;
+                validationChain.ChainPolicy.ExtraStore.Add(trustedCa);
+                if (!validationChain.Build(serverCertificate)) return false;
+                var elements = validationChain.ChainElements;
+                if (elements.Count == 0) return false;
+                var root = elements[elements.Count - 1].Certificate;
+                return string.Equals(root.Thumbprint, trustedCa.Thumbprint, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+
+        private static bool IsLocalNetworkUrl(string url)
         {
             Uri uri;
             if (!Uri.TryCreate(url, UriKind.Absolute, out uri)) return false;
             if (string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase)) return true;
             IPAddress address;
-            return IPAddress.TryParse(uri.Host, out address) && IPAddress.IsLoopback(address);
+            if (!IPAddress.TryParse(uri.Host, out address)) return false;
+            if (IPAddress.IsLoopback(address)) return true;
+            var bytes = address.GetAddressBytes();
+            if (bytes.Length != 4) return false;
+            return bytes[0] == 10
+                || (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31)
+                || (bytes[0] == 192 && bytes[1] == 168);
         }
 
         private static Task<string> UnknownServiceAsync(string serviceId)
@@ -411,13 +463,15 @@ namespace LocalServiceManager
             public readonly string Body;
             public readonly string Error;
             public readonly bool TimedOut;
+            public readonly bool Unavailable;
 
-            public HttpResult(int statusCode, string body, string error, bool timedOut)
+            public HttpResult(int statusCode, string body, string error, bool timedOut, bool unavailable)
             {
                 StatusCode = statusCode;
                 Body = body;
                 Error = error;
                 TimedOut = timedOut;
+                Unavailable = unavailable;
             }
         }
     }

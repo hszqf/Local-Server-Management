@@ -16,6 +16,7 @@ namespace LocalServiceManager
         private readonly CheckBox _startupCheckBox;
         private readonly Timer _timer;
         private readonly Timer _autoStartWatchTimer;
+        private readonly System.Threading.SemaphoreSlim _actionGate = new System.Threading.SemaphoreSlim(1, 1);
         private Label _titleLabel;
         private IList<ManagedServiceStatus> _lastStatuses = new List<ManagedServiceStatus>();
         private bool _busy;
@@ -92,6 +93,7 @@ namespace LocalServiceManager
                 _timer.Dispose();
                 _autoStartWatchTimer.Dispose();
                 _tray.Dispose();
+                _actionGate.Dispose();
             }
             base.Dispose(disposing);
         }
@@ -350,7 +352,7 @@ namespace LocalServiceManager
 
         private async Task RunActionAsync(string label, Func<Task<string>> action)
         {
-            if (_busy) return;
+            await _actionGate.WaitAsync();
             _busy = true;
             try
             {
@@ -366,6 +368,7 @@ namespace LocalServiceManager
             finally
             {
                 _busy = false;
+                _actionGate.Release();
             }
             await RefreshStatusesAsync(true);
         }
@@ -378,7 +381,8 @@ namespace LocalServiceManager
 
         private async Task EnsureAutoStartServicesRunningAsync(string label)
         {
-            if (_busy || _autoStartCheckBusy) return;
+            if (_autoStartCheckBusy) return;
+            if (!await _actionGate.WaitAsync(0)) return;
             _busy = true;
             _autoStartCheckBusy = true;
             try
@@ -411,6 +415,7 @@ namespace LocalServiceManager
             {
                 _autoStartCheckBusy = false;
                 _busy = false;
+                _actionGate.Release();
                 UpdateStartupCheckBox();
             }
         }

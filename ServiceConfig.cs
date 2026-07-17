@@ -141,6 +141,7 @@ namespace LocalServiceManager
     {
         public string type { get; set; }
         public string url { get; set; }
+        public string tlsCaFile { get; set; }
         public string processName { get; set; }
         public int timeoutMs { get; set; }
         public int okStatusMax { get; set; }

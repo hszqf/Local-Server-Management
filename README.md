@@ -57,6 +57,7 @@ Each service supports:
 - `endpoint`: display URL.
 - `tags`: tab filters, such as `example`, `api`, or `frontend`.
 - `health`: `http` or `process` health check.
+- `health.tlsCaFile`: optional CA certificate path for one HTTPS health check; the certificate chain and URL host name are both validated without changing the Windows trust store.
 - `start`: `process` or `powershell` start action.
 - `stop`: `process` or `powershell` stop action.
 - `detached`: for `process` actions, set this to `true` when the command launches a long-running server and should return control to the manager immediately.
